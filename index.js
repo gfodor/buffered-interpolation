@@ -130,7 +130,7 @@ class InterpolationBuffer {
   }
 
   // Returns t/f if the update results in a dirty pos/rot/scale.
-  update(delta) {
+  update(delta, maxLerpDistance) {
     if (this.state === INITIALIZING) {
       if (this.buffer.length > 0) {
         this.updateOriginFrameToBufferTail();
@@ -180,7 +180,12 @@ class InterpolationBuffer {
         const delta_time = targetFrame.time - this.originFrame.time;
         const alpha = (mark - this.originFrame.time) / delta_time;
 
-        if (this.mode === MODE_LERP) {
+        if (maxLerpDistance && 
+          (Math.abs(targetFrame.position.x - this.originFrame.position.x) > maxLerpDistance || 
+           Math.abs(targetFrame.position.y - this.originFrame.position.y) > maxLerpDistance || 
+           Math.abs(targetFrame.position.z - this.originFrame.position.z) > maxLerpDistance)) {
+          this.position.set(targetFrame.position.x, targetFrame.position.y, targetFrame.position.z);
+        } else if (this.mode === MODE_LERP) {
           this.lerp(this.position, this.originFrame.position, targetFrame.position, alpha);
         } else if (this.mode === MODE_HERMITE) {
           this.hermite(

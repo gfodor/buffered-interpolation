@@ -160,7 +160,7 @@ var InterpolationBuffer = function () {
 
   }, {
     key: "update",
-    value: function update(delta) {
+    value: function update(delta, maxLerpDistance) {
       if (this.state === INITIALIZING) {
         if (this.buffer.length > 0) {
           this.updateOriginFrameToBufferTail();
@@ -210,7 +210,9 @@ var InterpolationBuffer = function () {
           var delta_time = targetFrame.time - this.originFrame.time;
           var alpha = (mark - this.originFrame.time) / delta_time;
 
-          if (this.mode === MODE_LERP) {
+          if (maxLerpDistance && (Math.abs(targetFrame.position.x - this.originFrame.position.x) > maxLerpDistance || Math.abs(targetFrame.position.y - this.originFrame.position.y) > maxLerpDistance || Math.abs(targetFrame.position.z - this.originFrame.position.z) > maxLerpDistance)) {
+            this.position.set(targetFrame.position.x, targetFrame.position.y, targetFrame.position.z);
+          } else if (this.mode === MODE_LERP) {
             this.lerp(this.position, this.originFrame.position, targetFrame.position, alpha);
           } else if (this.mode === MODE_HERMITE) {
             this.hermite(this.position, alpha, this.originFrame.position, targetFrame.position, this.originFrame.velocity.multiplyScalar(delta_time), targetFrame.velocity.multiplyScalar(delta_time));
