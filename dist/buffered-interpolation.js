@@ -9,6 +9,7 @@ function _classCallCheck(instance, Constructor) { if (!(instance instanceof Cons
 var INITIALIZING = 0;
 var BUFFERING = 1;
 var PLAYING = 2;
+var PAUSED = 3;
 
 var MODE_LERP = 0;
 var MODE_HERMITE = 1;
@@ -38,6 +39,14 @@ var freeFrame = function freeFrame(f) {
   return framePool.push(f);
 };
 
+var almostEqualVec3 = function almostEqualVec3(u, v, epsilon) {
+  return Math.abs(u.x - v.x) < epsilon && Math.abs(u.y - v.y) < epsilon && Math.abs(u.z - v.z) < epsilon;
+};
+
+var almostEqualQuat = function almostEqualQuat(u, v, epsilon) {
+  return Math.abs(u.x - v.x) < epsilon && Math.abs(u.y - v.y) < epsilon && Math.abs(u.z - v.z) < epsilon && Math.abs(u.w - v.w) < epsilon;
+};
+
 var InterpolationBuffer = function () {
   function InterpolationBuffer() {
     var mode = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : MODE_LERP;
@@ -49,6 +58,7 @@ var InterpolationBuffer = function () {
     this.buffer = [];
     this.bufferTime = bufferTime * 1000;
     this.time = 0;
+    this.lastTailCopyFrame = null;
     this.mode = mode;
 
     this.originFrame = getPooledFrame();
@@ -120,6 +130,10 @@ var InterpolationBuffer = function () {
 
         this.buffer.push(newFrame);
       }
+
+      if (this.state === PAUSED) {
+        this.state = PLAYING;
+      }
     }
   }, {
     key: "setTarget",
@@ -141,6 +155,9 @@ var InterpolationBuffer = function () {
     value: function setScale(scale) {
       this.appendBuffer(null, null, null, scale);
     }
+
+    // Returns t/f if the update results in a dirty pos/rot/scale.
+
   }, {
     key: "update",
     value: function update(delta) {
@@ -160,7 +177,16 @@ var InterpolationBuffer = function () {
         }
       }
 
+      if (this.state === PAUSED) {
+        var tailFrame = this.buffer[0];
+        tailFrame.time = this.time + delta;
+
+        return false;
+      }
+
       if (this.state === PLAYING) {
+        var tailFrameUsedThisFrame = false;
+
         var mark = this.time - this.bufferTime;
         //Purge this.buffer of expired frames
         while (this.buffer.length > 0 && mark > this.buffer[0].time) {
@@ -168,12 +194,15 @@ var InterpolationBuffer = function () {
           if (this.buffer.length > 1) {
             this.updateOriginFrameToBufferTail();
           } else {
-            this.originFrame.position.copy(this.buffer[0].position);
-            this.originFrame.velocity.copy(this.buffer[0].velocity);
-            this.originFrame.quaternion.copy(this.buffer[0].quaternion);
-            this.originFrame.scale.copy(this.buffer[0].scale);
-            this.originFrame.time = this.buffer[0].time;
-            this.buffer[0].time = this.time + delta;
+            var _tailFrame = this.buffer[0];
+
+            this.originFrame.position.copy(_tailFrame.position);
+            this.originFrame.velocity.copy(_tailFrame.velocity);
+            this.originFrame.quaternion.copy(_tailFrame.quaternion);
+            this.originFrame.scale.copy(_tailFrame.scale);
+            this.originFrame.time = _tailFrame.time;
+            _tailFrame.time = this.time + delta;
+            tailFrameUsedThisFrame = true;
           }
         }
         if (this.buffer.length > 0 && this.buffer[0].time > 0) {
@@ -190,12 +219,25 @@ var InterpolationBuffer = function () {
           this.slerp(this.quaternion, this.originFrame.quaternion, targetFrame.quaternion, alpha);
 
           this.lerp(this.scale, this.originFrame.scale, targetFrame.scale, alpha);
+
+          if (tailFrameUsedThisFrame) {
+            var reachedPos = almostEqualVec3(this.position, targetFrame.position, 0.0001);
+            var reachedRot = almostEqualQuat(this.quaternion, targetFrame.quaternion, 0.001);
+            var reachedScale = almostEqualVec3(this.scale, targetFrame.scale, 0.0001);
+
+            if (reachedPos && reachedRot && reachedScale) {
+              // Once the target is converged onto, pause lerping until we see new data.
+              this.state = PAUSED;
+            }
+          }
         }
       }
 
       if (this.state !== INITIALIZING) {
         this.time += delta;
       }
+
+      return true;
     }
   }, {
     key: "getPosition",

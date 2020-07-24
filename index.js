@@ -3,6 +3,7 @@
 const INITIALIZING = 0;
 const BUFFERING = 1;
 const PLAYING = 2;
+const PAUSED = 3;
 
 const MODE_LERP = 0;
 const MODE_HERMITE = 1;
@@ -26,12 +27,21 @@ const getPooledFrame = () => {
 
 const freeFrame = f => framePool.push(f);
 
+const almostEqualVec3 = function(u, v, epsilon) {
+  return Math.abs(u.x-v.x)<epsilon && Math.abs(u.y-v.y)<epsilon && Math.abs(u.z-v.z)<epsilon;
+};
+
+const almostEqualQuat = function(u, v, epsilon) {
+  return Math.abs(u.x-v.x)<epsilon && Math.abs(u.y-v.y)<epsilon && Math.abs(u.z-v.z)<epsilon && Math.abs(u.w-v.w)<epsilon;
+};
+
 class InterpolationBuffer {
   constructor(mode = MODE_LERP, bufferTime = 0.15) {
     this.state = INITIALIZING;
     this.buffer = [];
     this.bufferTime = bufferTime * 1000;
     this.time = 0;
+    this.lastTailCopyFrame = null;
     this.mode = mode;
 
     this.originFrame = getPooledFrame();
@@ -97,6 +107,10 @@ class InterpolationBuffer {
 
       this.buffer.push(newFrame);
     }
+
+    if (this.state === PAUSED) {
+      this.state = PLAYING;
+    }
   }
 
   setTarget(position, velocity, quaternion, scale) {
@@ -115,6 +129,7 @@ class InterpolationBuffer {
     this.appendBuffer(null, null, null, scale);
   }
 
+  // Returns t/f if the update results in a dirty pos/rot/scale.
   update(delta) {
     if (this.state === INITIALIZING) {
       if (this.buffer.length > 0) {
@@ -132,7 +147,16 @@ class InterpolationBuffer {
       }
     }
 
+    if (this.state === PAUSED) {
+      const tailFrame = this.buffer[0];
+      tailFrame.time = this.time + delta;
+
+      return false;
+    }
+
     if (this.state === PLAYING) {
+      let tailFrameUsedThisFrame = false;
+
       const mark = this.time - this.bufferTime;
       //Purge this.buffer of expired frames
       while (this.buffer.length > 0 && mark > this.buffer[0].time) {
@@ -140,12 +164,15 @@ class InterpolationBuffer {
         if (this.buffer.length > 1) {
           this.updateOriginFrameToBufferTail();
         } else {
-          this.originFrame.position.copy(this.buffer[0].position);
-          this.originFrame.velocity.copy(this.buffer[0].velocity);
-          this.originFrame.quaternion.copy(this.buffer[0].quaternion);
-          this.originFrame.scale.copy(this.buffer[0].scale);
-          this.originFrame.time = this.buffer[0].time;
-          this.buffer[0].time = this.time + delta;
+          const tailFrame = this.buffer[0];
+
+          this.originFrame.position.copy(tailFrame.position);
+          this.originFrame.velocity.copy(tailFrame.velocity);
+          this.originFrame.quaternion.copy(tailFrame.quaternion);
+          this.originFrame.scale.copy(tailFrame.scale);
+          this.originFrame.time = tailFrame.time;
+          tailFrame.time = this.time + delta;
+          tailFrameUsedThisFrame = true;
         }
       }
       if (this.buffer.length > 0 && this.buffer[0].time > 0) {
@@ -169,12 +196,25 @@ class InterpolationBuffer {
         this.slerp(this.quaternion, this.originFrame.quaternion, targetFrame.quaternion, alpha);
 
         this.lerp(this.scale, this.originFrame.scale, targetFrame.scale, alpha);
+
+        if (tailFrameUsedThisFrame) {
+          const reachedPos = almostEqualVec3(this.position, targetFrame.position, 0.0001);
+          const reachedRot = almostEqualQuat(this.quaternion, targetFrame.quaternion, 0.001);
+          const reachedScale = almostEqualVec3(this.scale, targetFrame.scale, 0.0001);
+
+          if (reachedPos && reachedRot && reachedScale) {
+            // Once the target is converged onto, pause lerping until we see new data.
+            this.state = PAUSED;
+          }
+        }
       }
     }
 
     if (this.state !== INITIALIZING) {
       this.time += delta;
     }
+
+    return true;
   }
 
   getPosition() {
