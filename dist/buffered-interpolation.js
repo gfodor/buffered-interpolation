@@ -29,14 +29,22 @@ var getPooledFrame = function getPooledFrame() {
   var frame = framePool.pop();
 
   if (!frame) {
-    frame = { position: new THREE.Vector3(), velocity: new THREE.Vector3(), scale: new THREE.Vector3(), quaternion: new THREE.Quaternion(), time: 0 };
+    frame = { position: new THREE.Vector3(),
+      velocity: new THREE.Vector3(),
+      scale: new THREE.Vector3(1, 1, 1),
+      quaternion: new THREE.Quaternion(),
+      wrotePosition: false,
+      wroteVelocity: false,
+      wroteScale: false,
+      wroteQuaternion: false, time: 0 };
   }
 
   return frame;
 };
 
 var freeFrame = function freeFrame(f) {
-  return framePool.push(f);
+  f.wrotePosition = f.wroteVelocity = f.wroteScale = f.wroteQuaternion = false;
+  framePool.push(f);
 };
 
 var almostEqualVec3 = function almostEqualVec3(u, v, epsilon) {
@@ -62,9 +70,13 @@ var InterpolationBuffer = function () {
     this.mode = mode;
 
     this.originFrame = getPooledFrame();
-    this.position = new THREE.Vector3();
-    this.quaternion = new THREE.Quaternion();
-    this.scale = new THREE.Vector3(1, 1, 1);
+
+    // These remain null until we have sufficient frames and perform a lerp step.
+    // The return value of update() is true if any of these are updated, but some may remain
+    // null until sufficient frames arrive.
+    this.position = null;
+    this.quaternion = null;
+    this.scale = null;
   }
 
   _createClass(InterpolationBuffer, [{
@@ -104,28 +116,49 @@ var InterpolationBuffer = function () {
       var tail = this.buffer.length > 0 ? this.buffer[this.buffer.length - 1] : null;
       // update the last entry in the buffer if this is the same frame
       if (tail && tail.time === this.time) {
-        if (position) {
+        if (position !== null) {
           tail.position.copy(position);
+          tail.wrotePosition = true;
         }
 
-        if (velocity) {
+        if (velocity !== null) {
           tail.velocity.copy(velocity);
+          tail.wroteVelocity = true;
         }
 
-        if (quaternion) {
+        if (quaternion !== null) {
           tail.quaternion.copy(quaternion);
+          tail.wroteQuaternion = true;
         }
 
-        if (scale) {
+        if (scale !== null) {
           tail.scale.copy(scale);
+          tail.wroteScale = true;
         }
       } else {
         var priorFrame = tail || this.originFrame;
         var newFrame = getPooledFrame();
-        newFrame.position.copy(position || priorFrame.position);
-        newFrame.velocity.copy(velocity || priorFrame.velocity);
-        newFrame.quaternion.copy(quaternion || priorFrame.quaternion);
-        newFrame.scale.copy(scale || priorFrame.scale);
+
+        if (position !== null || priorFrame.wrotePosition) {
+          newFrame.position.copy(position || priorFrame.position);
+          newFrame.wrotePosition = true;
+        }
+
+        if (velocity !== null || priorFrame.wroteVelocity) {
+          newFrame.velocity.copy(velocity || priorFrame.velocity);
+          newFrame.wroteVelocity = true;
+        }
+
+        if (quaternion !== null || priorFrame.wroteQuaternion) {
+          newFrame.quaternion.copy(quaternion || priorFrame.quaternion);
+          newFrame.wroteQuaternion = true;
+        }
+
+        if (scale !== null || priorFrame.wroteScale) {
+          newFrame.scale.copy(scale || priorFrame.scale);
+          newFrame.wroteScale = true;
+        }
+
         newFrame.time = this.time;
 
         this.buffer.push(newFrame);
@@ -142,7 +175,9 @@ var InterpolationBuffer = function () {
     }
   }, {
     key: "setPosition",
-    value: function setPosition(position, velocity) {
+    value: function setPosition(position) {
+      var velocity = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : null;
+
       this.appendBuffer(position, velocity, null, null);
     }
   }, {
@@ -164,9 +199,39 @@ var InterpolationBuffer = function () {
       if (this.state === INITIALIZING) {
         if (this.buffer.length > 0) {
           this.updateOriginFrameToBufferTail();
-          this.position.copy(this.originFrame.position);
-          this.quaternion.copy(this.originFrame.quaternion);
-          this.scale.copy(this.originFrame.scale);
+          var _originFrame = this.originFrame,
+              position = _originFrame.position,
+              wrotePosition = _originFrame.wrotePosition,
+              quaternion = _originFrame.quaternion,
+              wroteQuaternion = _originFrame.wroteQuaternion,
+              scale = _originFrame.scale,
+              wroteScale = _originFrame.wroteScale;
+
+
+          if (wrotePosition) {
+            if (this.position === null) {
+              this.position = new THREE.Vector3(position.x, position.y, position.z);
+            } else {
+              this.position.copy(position);
+            }
+          }
+
+          if (wroteQuaternion) {
+            if (this.quaternion === null) {
+              this.quaternion = new THREE.Quaternion(quaternion.x, quaternion.y, quaternion.z, quaternion.w);
+            } else {
+              this.quaternion.copy(quaternion);
+            }
+          }
+
+          if (wroteScale) {
+            if (this.scale === null) {
+              this.scale = new THREE.Vector3(scale.x, scale.y, scale.z);
+            } else {
+              this.scale.copy(scale);
+            }
+          }
+
           this.state = BUFFERING;
         }
       }
@@ -184,6 +249,10 @@ var InterpolationBuffer = function () {
         return false;
       }
 
+      var setPosition = void 0,
+          setQuaternion = void 0,
+          setScale = void 0;
+
       if (this.state === PLAYING) {
         var tailFrameUsedThisFrame = false;
 
@@ -196,13 +265,30 @@ var InterpolationBuffer = function () {
           } else {
             var _tailFrame = this.buffer[0];
 
-            this.originFrame.position.copy(_tailFrame.position);
-            this.originFrame.velocity.copy(_tailFrame.velocity);
-            this.originFrame.quaternion.copy(_tailFrame.quaternion);
-            this.originFrame.scale.copy(_tailFrame.scale);
-            this.originFrame.time = _tailFrame.time;
-            _tailFrame.time = this.time + delta;
-            tailFrameUsedThisFrame = true;
+            if (_tailFrame.wrotePosition) {
+              this.originFrame.position.copy(_tailFrame.position);
+              tailFrameUsedThisFrame = true;
+            }
+
+            if (_tailFrame.wroteVelocity) {
+              this.originFrame.velocity.copy(_tailFrame.velocity);
+              tailFrameUsedThisFrame = true;
+            }
+
+            if (_tailFrame.wroteQuaternion) {
+              this.originFrame.quaternion.copy(_tailFrame.quaternion);
+              tailFrameUsedThisFrame = true;
+            }
+
+            if (_tailFrame.wroteScale) {
+              this.originFrame.scale.copy(_tailFrame.scale);
+              tailFrameUsedThisFrame = true;
+            }
+
+            if (tailFrameUsedThisFrame) {
+              this.originFrame.time = _tailFrame.time;
+              _tailFrame.time = this.time + delta;
+            }
           }
         }
         if (this.buffer.length > 0 && this.buffer[0].time > 0) {
@@ -210,22 +296,55 @@ var InterpolationBuffer = function () {
           var delta_time = targetFrame.time - this.originFrame.time;
           var alpha = (mark - this.originFrame.time) / delta_time;
 
-          if (maxLerpDistance && (Math.abs(targetFrame.position.x - this.originFrame.position.x) > maxLerpDistance || Math.abs(targetFrame.position.y - this.originFrame.position.y) > maxLerpDistance || Math.abs(targetFrame.position.z - this.originFrame.position.z) > maxLerpDistance)) {
-            this.position.set(targetFrame.position.x, targetFrame.position.y, targetFrame.position.z);
-          } else if (this.mode === MODE_LERP) {
-            this.lerp(this.position, this.originFrame.position, targetFrame.position, alpha);
-          } else if (this.mode === MODE_HERMITE) {
-            this.hermite(this.position, alpha, this.originFrame.position, targetFrame.position, this.originFrame.velocity.multiplyScalar(delta_time), targetFrame.velocity.multiplyScalar(delta_time));
+          if (this.originFrame.wrotePosition && targetFrame.wrotePosition) {
+            if (maxLerpDistance && (Math.abs(targetFrame.position.x - this.originFrame.position.x) > maxLerpDistance || Math.abs(targetFrame.position.y - this.originFrame.position.y) > maxLerpDistance || Math.abs(targetFrame.position.z - this.originFrame.position.z) > maxLerpDistance)) {
+
+              if (this.position === null) {
+                this.position = new THREE.Vector3(targetFrame.position.x, targetFrame.position.y, targetFrame.position.z);
+              } else {
+                this.position.set(targetFrame.position.x, targetFrame.position.y, targetFrame.position.z);
+              }
+            } else if (this.mode === MODE_LERP) {
+              if (this.position === null) {
+                this.position = new THREE.Vector3();
+              }
+
+              this.lerp(this.position, this.originFrame.position, targetFrame.position, alpha);
+            } else if (this.mode === MODE_HERMITE) {
+              if (this.position === null) {
+                this.position = new THREE.Vector3();
+              }
+
+              this.hermite(this.position, alpha, this.originFrame.position, targetFrame.position, this.originFrame.velocity.multiplyScalar(delta_time), targetFrame.velocity.multiplyScalar(delta_time));
+            }
+
+            setPosition = true;
           }
 
-          this.slerp(this.quaternion, this.originFrame.quaternion, targetFrame.quaternion, alpha);
+          if (this.originFrame.wroteQuaternion && targetFrame.wroteQuaternion) {
+            if (this.quaternion === null) {
+              this.quaternion = new THREE.Quaternion();
+            }
 
-          this.lerp(this.scale, this.originFrame.scale, targetFrame.scale, alpha);
+            this.slerp(this.quaternion, this.originFrame.quaternion, targetFrame.quaternion, alpha);
+
+            setQuaternion = true;
+          }
+
+          if (this.originFrame.wroteScale && targetFrame.wroteScale) {
+            if (this.scale === null) {
+              this.scale = new THREE.Vector3();
+            }
+
+            this.lerp(this.scale, this.originFrame.scale, targetFrame.scale, alpha);
+
+            setScale = true;
+          }
 
           if (tailFrameUsedThisFrame) {
-            var reachedPos = almostEqualVec3(this.position, targetFrame.position, 0.0001);
-            var reachedRot = almostEqualQuat(this.quaternion, targetFrame.quaternion, 0.001);
-            var reachedScale = almostEqualVec3(this.scale, targetFrame.scale, 0.0001);
+            var reachedPos = !targetFrame.wrotePosition || this.position !== null && almostEqualVec3(this.position, targetFrame.position, 0.0001);
+            var reachedRot = !targetFrame.wroteQuaternion || this.quaternion !== null && almostEqualQuat(this.quaternion, targetFrame.quaternion, 0.001);
+            var reachedScale = !targetFrame.wroteScale || this.scale !== null && almostEqualVec3(this.scale, targetFrame.scale, 0.0001);
 
             if (reachedPos && reachedRot && reachedScale) {
               // Once the target is converged onto, pause lerping until we see new data.
@@ -239,7 +358,7 @@ var InterpolationBuffer = function () {
         this.time += delta;
       }
 
-      return true;
+      return setPosition || setQuaternion || setScale;
     }
   }, {
     key: "getPosition",
