@@ -196,6 +196,10 @@ var InterpolationBuffer = function () {
   }, {
     key: "update",
     value: function update(delta, maxLerpDistance) {
+      var setPosition = void 0,
+          setQuaternion = void 0,
+          setScale = void 0;
+
       if (this.state === INITIALIZING) {
         if (this.buffer.length > 0) {
           this.updateOriginFrameToBufferTail();
@@ -214,6 +218,8 @@ var InterpolationBuffer = function () {
             } else {
               this.position.copy(position);
             }
+
+            setPosition = true;
           }
 
           if (wroteQuaternion) {
@@ -222,6 +228,8 @@ var InterpolationBuffer = function () {
             } else {
               this.quaternion.copy(quaternion);
             }
+
+            setQuaternion = true;
           }
 
           if (wroteScale) {
@@ -230,6 +238,8 @@ var InterpolationBuffer = function () {
             } else {
               this.scale.copy(scale);
             }
+
+            setScale = true;
           }
 
           this.state = BUFFERING;
@@ -248,10 +258,6 @@ var InterpolationBuffer = function () {
 
         return false;
       }
-
-      var setPosition = void 0,
-          setQuaternion = void 0,
-          setScale = void 0;
 
       if (this.state === PLAYING) {
         var tailFrameUsedThisFrame = false;

@@ -166,6 +166,8 @@ class InterpolationBuffer {
 
   // Returns t/f if the update results in a dirty pos/rot/scale.
   update(delta, maxLerpDistance) {
+    let setPosition, setQuaternion, setScale;
+
     if (this.state === INITIALIZING) {
       if (this.buffer.length > 0) {
         this.updateOriginFrameToBufferTail();
@@ -177,6 +179,8 @@ class InterpolationBuffer {
           } else {
             this.position.copy(position);
           }
+
+          setPosition = true;
         }
 
         if (wroteQuaternion) {
@@ -185,6 +189,8 @@ class InterpolationBuffer {
           } else {
             this.quaternion.copy(quaternion);
           }
+
+          setQuaternion = true;
         }
 
         if (wroteScale) {
@@ -193,6 +199,8 @@ class InterpolationBuffer {
           } else {
             this.scale.copy(scale);
           }
+
+          setScale = true;
         }
 
         this.state = BUFFERING;
@@ -211,8 +219,6 @@ class InterpolationBuffer {
 
       return false;
     }
-
-    let setPosition, setQuaternion, setScale;
 
     if (this.state === PLAYING) {
       let tailFrameUsedThisFrame = false;
